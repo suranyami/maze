@@ -17,7 +17,7 @@ defmodule MazeWeb.Router do
   scope "/", MazeWeb do
     pipe_through :browser
 
-    get "/", PageController, :home
+    live "/", MazeLive
   end
 
   # Other scopes may use custom stacks.
