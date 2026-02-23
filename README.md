@@ -125,12 +125,12 @@ A pre-built image is published automatically by GitHub Actions on every push
 to `main` and on `v*` version tags. To use it directly:
 
 ```sh
-docker pull djp/maze:latest
+docker pull suranyami/maze:latest
 docker run -d \
   -e SECRET_KEY_BASE=<64-byte secret> \
   -e PHX_HOST=maze.example.com \
   -p 4000:4000 \
-  djp/maze:latest
+  suranyami/maze:latest
 ```
 
 ### GitHub Actions setup
