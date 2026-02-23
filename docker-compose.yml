@@ -1,10 +1,9 @@
 services:
-  app:
-    build: .
-    restart: unless-stopped
-    ports:
-      - "4000:4000"
+  maze:
+    image: suranyami/maze:latest
     environment:
-      PHX_HOST: ${PHX_HOST:-localhost}
+      PHX_HOST: maze.suranyami.com
       PORT: "4000"
-      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
+      SECRET_KEY_BASE: RH2Z8lh5hohIBPaLRd6SVx8ko
+    x-ports:
+      - maze.suranyami.com:4000/https
