@@ -14,16 +14,16 @@ defmodule MazeWeb.Components.MazeSvg do
       |   |   S   |   |
   y4  +---+-------+---+
 
-  For every **over-cell** (normal or the over-passage of a crossing):
-    - Linked direction: draw two corridor-wall segments (the sides of the opening)
-    - Unlinked direction: draw one inner wall segment (closing the passage)
+  **Fills (white rectangles):** rendered first (bottom layer)
+    - Centre region `[x2,x3]×[y2,y3]` — always white
+    - Each directional strip (N/S/E/W) — white when linked in that direction
+    - Corner regions are never filled, so the page background shows through
 
-  For every **under-cell** (the passage that tunnels beneath another):
-    - `over: :north_south` (N-S over, E-W under) — draw horizontal caps at W and E entries
-    - `over: :east_west`   (E-W over, N-S under) — draw vertical caps at N and S entries
+  **Lines (black):** rendered on top of fills
+    - Over-cell: linked direction → two corridor-wall segments; unlinked → inner wall
+    - Crossing (under-cell): over-corridor full-span lines + under-tunnel entry caps
 
-  No explicit outer border is drawn; the inner wall segments of border cells
-  provide the visual boundary.
+  No explicit outer border or background rect; non-corridor areas are transparent.
   """
 
   use Phoenix.Component
@@ -42,15 +42,19 @@ defmodule MazeWeb.Components.MazeSvg do
   """
   attr :grid, :map, required: true
   attr :cell_size, :integer, default: 25
+  attr :show_shadows, :boolean, default: true
 
   def render(assigns) do
     %{grid: grid, cell_size: cs} = assigns
     inset = cs * @inset_ratio
+    fills = compute_fills(grid, cs, inset)
+    shadows = if assigns.show_shadows, do: compute_shadows(grid, cs, inset), else: []
     lines = compute_lines(grid, cs, inset)
     width = grid.cols * cs
     height = grid.rows * cs
 
-    assigns = assign(assigns, lines: lines, width: width, height: height)
+    assigns =
+      assign(assigns, fills: fills, shadows: shadows, lines: lines, width: width, height: height)
 
     ~H"""
     <svg
@@ -58,8 +62,9 @@ defmodule MazeWeb.Components.MazeSvg do
       height={@height}
       viewBox={"0 0 #{@width} #{@height}"}
       xmlns="http://www.w3.org/2000/svg"
-      style="background: white;"
     >
+      <rect :for={{x, y, w, h} <- @fills} x={x} y={y} width={w} height={h} fill="white" />
+      <rect :for={{x, y, w, h} <- @shadows} x={x} y={y} width={w} height={h} fill="black" />
       <line
         :for={{x1, y1, x2, y2} <- @lines}
         x1={x1}
@@ -75,32 +80,139 @@ defmodule MazeWeb.Components.MazeSvg do
   end
 
   # ---------------------------------------------------------------------------
-  # Line computation
+  # Fill computation (white corridor rectangles)
+  # ---------------------------------------------------------------------------
+
+  defp compute_fills(%Grid{} = grid, cs, inset) do
+    Enum.flat_map(grid.cells, fn {id, cell} ->
+      x1 = cell.col * cs
+      x4 = x1 + cs
+      x2 = x1 + inset
+      x3 = x4 - inset
+
+      y1 = cell.row * cs
+      y4 = y1 + cs
+      y2 = y1 + inset
+      y3 = y4 - inset
+
+      if Grid.crossing?(grid, id) do
+        crossing_fills(x1, x2, x3, x4, y1, y2, y3, y4)
+      else
+        over_cell_fills(grid, id, cell, x1, x2, x3, x4, y1, y2, y3, y4)
+      end
+    end)
+  end
+
+  # Normal cell: centre always filled; each directional strip filled when linked.
+  defp over_cell_fills(grid, id, cell, x1, x2, x3, x4, y1, y2, y3, y4) do
+    cw = x3 - x2
+    ch = y3 - y2
+
+    center = [{x2, y2, cw, ch}]
+
+    north =
+      if not is_nil(cell.north) and Grid.linked?(grid, id, cell.north),
+        do: [{x2, y1, cw, y2 - y1}],
+        else: []
+
+    south =
+      if not is_nil(cell.south) and Grid.linked?(grid, id, cell.south),
+        do: [{x2, y3, cw, y4 - y3}],
+        else: []
+
+    west =
+      if not is_nil(cell.west) and Grid.linked?(grid, id, cell.west),
+        do: [{x1, y2, x2 - x1, ch}],
+        else: []
+
+    east =
+      if not is_nil(cell.east) and Grid.linked?(grid, id, cell.east),
+        do: [{x3, y2, x4 - x3, ch}],
+        else: []
+
+    center ++ north ++ south ++ west ++ east
+  end
+
+  # Crossing cell: both passages are always active so all five regions are filled.
+  defp crossing_fills(x1, x2, x3, x4, y1, y2, y3, y4) do
+    cw = x3 - x2
+    ch = y3 - y2
+
+    [
+      {x2, y2, cw, ch},
+      {x2, y1, cw, y2 - y1},
+      {x2, y3, cw, y4 - y3},
+      {x1, y2, x2 - x1, ch},
+      {x3, y2, x4 - x3, ch}
+    ]
+  end
+
+  # ---------------------------------------------------------------------------
+  # Shadow computation (solid black rectangles at crossing over-passages)
+  # ---------------------------------------------------------------------------
+
+  # One thin shadow rect per crossing cell, placed in the inset gap alongside the
+  # over-corridor centre region:
+  #   - N-S over (vertical corridor): shadow on the right  → (x3, y2, inset, ch)
+  #   - E-W over (horizontal corridor): shadow on the bottom → (x2, y3, cw, inset)
+  defp compute_shadows(%Grid{} = grid, cs, inset) do
+    Enum.flat_map(grid.cells, fn {id, cell} ->
+      if Grid.crossing?(grid, id) do
+        x1 = cell.col * cs
+        x4 = x1 + cs
+        x2 = x1 + inset
+        x3 = x4 - inset
+
+        y1 = cell.row * cs
+        y4 = y1 + cs
+        y2 = y1 + inset
+        y3 = y4 - inset
+
+        cw = x3 - x2
+        ch = y3 - y2
+
+        %{over: over_direction} = Grid.crossing_for(grid, id)
+
+        case over_direction do
+          :north_south ->
+            # N-S corridor runs vertically; shadow on its right side.
+            [{x3, y2, inset, ch}]
+
+          :east_west ->
+            # E-W corridor runs horizontally; shadow on its bottom.
+            [{x2, y3, cw, inset}]
+        end
+      else
+        []
+      end
+    end)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Line computation (black wall lines)
   # ---------------------------------------------------------------------------
 
   defp compute_lines(%Grid{} = grid, cs, inset) do
     Enum.flat_map(grid.cells, fn {id, cell} ->
-      # Inset coordinates for this cell
-      cx1 = cell.col * cs
-      cx4 = cx1 + cs
-      cx2 = cx1 + inset
-      cx3 = cx4 - inset
+      x1 = cell.col * cs
+      x4 = x1 + cs
+      x2 = x1 + inset
+      x3 = x4 - inset
 
-      cy1 = cell.row * cs
-      cy4 = cy1 + cs
-      cy2 = cy1 + inset
-      cy3 = cy4 - inset
+      y1 = cell.row * cs
+      y4 = y1 + cs
+      y2 = y1 + inset
+      y3 = y4 - inset
 
       if Grid.crossing?(grid, id) do
-        under_cell_lines(grid, id, cx1, cx2, cx3, cx4, cy1, cy2, cy3, cy4)
+        under_cell_lines(grid, id, x1, x2, x3, x4, y1, y2, y3, y4)
       else
-        over_cell_lines(grid, id, cell, cx1, cx2, cx3, cx4, cy1, cy2, cy3, cy4)
+        over_cell_lines(grid, id, cell, x1, x2, x3, x4, y1, y2, y3, y4)
       end
     end)
   end
 
   # Over-cell: normal cell or the over-passage side of a crossing.
-  # Each of the four directions is drawn independently.
   defp over_cell_lines(grid, id, cell, x1, x2, x3, x4, y1, y2, y3, y4) do
     north_lines(grid, id, cell.north, x2, x3, y1, y2) ++
       south_lines(grid, id, cell.south, x2, x3, y3, y4) ++
@@ -144,15 +256,7 @@ defmodule MazeWeb.Components.MazeSvg do
     end
   end
 
-  # Crossing cell: draws both the over-corridor walls and the under-tunnel caps.
-  #
-  # The book uses two separate cell objects at the same grid position (OverCell +
-  # UnderCell). Since this implementation has a single cell per position, we must
-  # draw both contributions here.
-  #
-  # Over-corridor walls are the two long lines that bound the over-passage as it
-  # runs through the crossing cell. Under-tunnel caps are the four short segments
-  # at the tunnel entry/exit points showing the opening of the under-passage.
+  # Crossing cell: over-corridor full-span lines + under-tunnel entry caps.
   defp under_cell_lines(grid, id, x1, x2, x3, x4, y1, y2, y3, y4) do
     %{over: over_direction} = Grid.crossing_for(grid, id)
 
