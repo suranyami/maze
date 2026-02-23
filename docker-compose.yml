@@ -4,6 +4,6 @@ services:
     environment:
       PHX_HOST: maze.suranyami.com
       PORT: "4000"
-      SECRET_KEY_BASE: RH2Z8lh5hohIBPaLRd6SVx8ko
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
     x-ports:
       - maze.suranyami.com:4000/https
