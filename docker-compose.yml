@@ -5,7 +5,5 @@ services:
       PHX_HOST: maze.suranyami.com
       PORT: "4000"
       SECRET_KEY_BASE: RH2Z8lh5hohIBPaLRd6SVx8ko
-    security_opt:
-      - apparmor:unconfined
     x-ports:
       - maze.suranyami.com:4000/https
